@@ -1,4 +1,5 @@
-<%@page import="org.jivesoftware.util.JiveGlobals"%>
+<%@ page contentType="text/html; charset=UTF-8" %>
+<%@ page import="org.jivesoftware.util.JiveGlobals"%>
 <%@ page import="org.jivesoftware.util.ParamUtils,
                  org.jivesoftware.util.TaskEngine,
                  org.jivesoftware.openfire.XMPPServer,
