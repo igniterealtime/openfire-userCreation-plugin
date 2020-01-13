@@ -24,13 +24,23 @@ import org.xmpp.packet.Message;
 import org.xmpp.packet.Presence;
 
 import java.io.File;
-import java.util.Arrays;
-import java.util.Hashtable;
-import java.util.Map;
-import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
+import javax.net.ssl.*;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.jivesoftware.smack.*;
+import org.jivesoftware.smack.packet.Stanza;
+import org.jivesoftware.smack.tcp.*;
+import org.jivesoftware.smack.roster.*;
+import org.jivesoftware.smack.filter.*;
+import org.jivesoftware.smack.provider.*;
+import org.jivesoftware.smack.util.*;
+
 
 /**
  * Created by IntelliJ IDEA.
@@ -40,11 +50,15 @@ import java.util.concurrent.TimeUnit;
  * To change this template use File | Settings | File Templates.
  */
 public class UserCreationPlugin implements Plugin {
+    private static Logger Log = LoggerFactory.getLogger( "UserCreationPlugin" );
 
     private static Hashtable<RosterItem.SubType, Map<String, Map<Presence.Type, Change>>> stateTable =
             new Hashtable<RosterItem.SubType, Map<String, Map<Presence.Type, Change>>>();
     private Element vCard;
     public static final int DEFAULT_MAX_TIME_DEBUG = 30;
+    private static final ConcurrentHashMap<String, XMPPTCPConnection> connections = new ConcurrentHashMap<String, XMPPTCPConnection>();
+    private StanzaListener stanzaListener;
+
 
     static {
         Hashtable<Presence.Type, Change> subrTable;
@@ -206,13 +220,110 @@ public class UserCreationPlugin implements Plugin {
     }
 
     public void destroyPlugin() {
-        // Do nothing
+        try {
+            for (XMPPTCPConnection connection : connections.values())
+            {
+                connection.removeAsyncStanzaListener(stanzaListener);
+                connection.disconnect(new org.jivesoftware.smack.packet.Presence(org.jivesoftware.smack.packet.Presence.Type.unavailable));
+            }
+        } catch (Exception e) {}
+    }
+
+    public void createSessions(String userPrefix, int from, int total)
+    {
+        UserManager userManager = XMPPServer.getInstance().getUserManager();
+        Log.info("Creating users accounts: " + total);
+        int created = 0;
+
+        for (int i = from; i < from + total; i++) {
+            try {
+                String username = userPrefix + i;
+                XMPPTCPConnection connection = createConnection(username, username);
+
+                if (connection != null)
+                {
+                    created++;
+
+                    org.jivesoftware.smack.packet.Presence p = new org.jivesoftware.smack.packet.Presence(org.jivesoftware.smack.packet.Presence.Type.available);
+                    p.setStatus("Hello Worlds!!");
+                    connection.sendStanza(p);
+                }
+            } catch (Exception e) {
+                Log.error("createSessions error", e);
+            }
+        }
+        Log.info("Accounts created successfully: " + created);
+    }
+
+    private XMPPTCPConnection createConnection(String username, String password)
+    {
+        XMPPTCPConnection connection = null;
+
+        try {
+            XMPPTCPConnectionConfiguration.Builder config = XMPPTCPConnectionConfiguration.builder();
+            config.setUsernameAndPassword(username, password);
+            config.setXmppDomain(XMPPServer.getInstance().getServerInfo().getXMPPDomain());
+            config.setResource(username + (new Random(new Date().getTime()).nextInt()));
+            config.setHost(XMPPServer.getInstance().getServerInfo().getHostname());
+            config.setPort(5222);
+
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+
+            TrustManager tm = new X509TrustManager() {
+                @Override
+                public void checkClientTrusted(X509Certificate[] x509Certificates, String s)
+                    throws CertificateException {
+                }
+
+                @Override
+                public void checkServerTrusted(X509Certificate[] x509Certificates, String s)
+                    throws CertificateException {
+                }
+
+                @Override
+                public X509Certificate[] getAcceptedIssuers() {
+                    return new X509Certificate[0];
+                }
+            };
+            sslContext.init(null, new TrustManager[] {tm}, null);
+            config.setCustomSSLContext(sslContext);
+
+            connection = new XMPPTCPConnection(config.build());
+            connection.connect();
+            connection.login();
+
+            final XMPPTCPConnection conn = connection;
+
+            stanzaListener = new StanzaListener()
+            {
+                public void processStanza(Stanza packet) {
+                    Log.debug(packet.toString());
+                }
+            };
+
+            connection.addAsyncStanzaListener(stanzaListener, new PacketTypeFilter(org.jivesoftware.smack.packet.Message.class));
+            org.jivesoftware.smack.roster.Roster roster = org.jivesoftware.smack.roster.Roster.getInstanceFor(connection);
+
+            Collection<RosterEntry> entries = roster.getEntries();
+
+            Log.debug("User - " + username);
+
+            for (RosterEntry entry : entries) {
+                Log.debug("Roster Item - " + entry.getUser() + entry.getName());
+            }
+
+            connections.put(connection.getStreamId(), connection);
+
+        } catch (Exception e) {
+            Log.error("createConnection", e);
+        }
+        return connection;
     }
 
     public void createUsers(String userPrefix, int from, int total) {
         // Create users
         UserManager userManager = XMPPServer.getInstance().getUserManager();
-        System.out.println("Creating users accounts: " + total);
+        Log.info("Creating users accounts: " + total);
         int created = 0;
         for (int i = from; i < from + total; i++) {
             try {
@@ -223,7 +334,7 @@ public class UserCreationPlugin implements Plugin {
                 // Ignore
             }
         }
-        System.out.println("Accounts created successfully: " + created);
+        Log.info("Accounts created successfully: " + created);
     }
 
     public void populateRosters(String userPrefix, int from, int total, int usersPerRoster) {
@@ -232,10 +343,10 @@ public class UserCreationPlugin implements Plugin {
 
 
         int batchTotal = total / usersPerRoster;
-        System.out.println("Total batches of users: " + batchTotal);
+        Log.info("Total batches of users: " + batchTotal);
         for (int batchNumber = 0; batchNumber < batchTotal; batchNumber++) {
 
-            System.out.println("Current batch: " + batchNumber + ". Users: " + batchNumber*usersPerRoster + " - " + ((batchNumber*usersPerRoster)+usersPerRoster));
+            Log.info("Current batch: " + batchNumber + ". Users: " + batchNumber*usersPerRoster + " - " + ((batchNumber*usersPerRoster)+usersPerRoster));
             // Add rosters items between connected users
             for (int i = (batchNumber * usersPerRoster) + from;
                  i < (batchNumber * usersPerRoster) + usersPerRoster + from; i++) {
@@ -273,12 +384,12 @@ public class UserCreationPlugin implements Plugin {
                 }
             }
         }
-        System.out.println("Rosters populated with " + usersPerRoster + " contacts.");
+        Log.info("Rosters populated with " + usersPerRoster + " contacts.");
     }
 
     public void createVCards(String userPrefix, int from, int total) {
         // Create users
-        System.out.println("Creating users vCards: " + total);
+        Log.info("Creating users vCards: " + total);
         int created = 0;
         for (int i = from; i < from + total; i++) {
             try {
@@ -289,12 +400,13 @@ public class UserCreationPlugin implements Plugin {
                 // Ignore
             }
         }
-        System.out.println("VCards created successfully: " + created);
+        Log.info("VCards created successfully: " + created);
     }
-    
+
+
     public static final int NUMBER_CONVERSATION = 10;
     public static final int NUMBER_MESSAGES = 10 ;//+ RandomUtils.nextInt(9);
-    
+
     public void generateMessages() {
         JiveGlobals.setProperty("conversation.maxTimeDebug", String.valueOf(DEFAULT_MAX_TIME_DEBUG));
         XMPPServer server = XMPPServer.getInstance();
@@ -302,7 +414,7 @@ public class UserCreationPlugin implements Plugin {
 
         for (User user : UserManager.getInstance().getUsers()) {
             final JID userJid = server.createJID(user.getUsername(), null);
-            System.out.println("Creating messages for user: " + userJid.getNode());
+            Log.info("Creating messages for user: " + userJid.getNode());
             for (RosterItem ri : user.getRoster().getRosterItems()) {
                 final JID rosterItemJid = ri.getJid();
 
@@ -358,7 +470,7 @@ public class UserCreationPlugin implements Plugin {
         taskExecutor.shutdown();
         try {
             taskExecutor.awaitTermination(2, TimeUnit.HOURS);
-            System.out.println("Conversation generation finished");
+            Log.info("Conversation generation finished");
         } catch (InterruptedException e) {
             e.printStackTrace();
         }

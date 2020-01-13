@@ -23,7 +23,9 @@
     String from = ParamUtils.getParameter(request, "from");
     String total = ParamUtils.getParameter(request, "total");
     String usersPerRoster = ParamUtils.getParameter(request, "usersPerRoster");
+    boolean createUsers =  request.getParameter("userCreate") != null;    
     boolean generateMessages =  request.getParameter("messageGenerate") != null;
+    boolean createSessions =  request.getParameter("sessionCreate") != null;    
     
     Map<String, String> errors = new HashMap<String, String>();
 
@@ -35,6 +37,8 @@
         final int maxUsers = Integer.parseInt(total);
         final int usersRoster = Integer.parseInt(usersPerRoster) + 1;
         final boolean boolGenerateMessages = generateMessages;
+        final boolean boolCreateSessions = createSessions;        
+        final boolean boolCreateUsers = createUsers;          
 
         if (maxUsers % usersRoster != 0 || maxUsers <= usersRoster) {
             errors.put("arguments", ""); 
@@ -45,13 +49,21 @@
                     (UserCreationPlugin) XMPPServer.getInstance().getPluginManager().getPlugin("usercreation");
             TaskEngine.getInstance().submit(new Runnable() {
                 public void run() {
-                    plugin.createUsers(userPrefix, intFrom, maxUsers);
-                    plugin.populateRosters(userPrefix, intFrom, maxUsers, usersRoster);
-                    plugin.createVCards(userPrefix, intFrom, maxUsers);
+                
+                    if (boolCreateUsers)
+                    {
+                        plugin.createUsers(userPrefix, intFrom, maxUsers);
+                        plugin.populateRosters(userPrefix, intFrom, maxUsers, usersRoster);
+                        plugin.createVCards(userPrefix, intFrom, maxUsers);
+                    }
+                                        
+                    if (boolCreateSessions) {
+                        plugin.createSessions(userPrefix, intFrom, maxUsers);
+                    }                      
+                    
                     if (boolGenerateMessages) {
                         plugin.generateMessages();
-                    }
-                    
+                    }                  
                 }
             });
             running = true;
@@ -123,10 +135,20 @@
             </td>
         </tr>
         <tr>
+            <td colspan="2" width="90%"><label class="jive-label" for="userCreate">Create Users:</label><br>
+            Creates user accounts..</td>
+            <td><input type="checkbox" id="userCreate" name="userCreate" <%= "checked" %> /></td>
+        </tr>   
+        <tr>
+            <td colspan="2" width="90%"><label class="jive-label" for="sessionCreate">Create user sessions:</label><br>
+            Creates dummy user sessions. Useful for testing TLS connections under load.</td>
+            <td><input type="checkbox" id="sessionCreate" name="sessionCreate" <%= "checked" %> /></td>
+        </tr>          
+        <tr>
             <td colspan="2" width="90%"><label class="jive-label" for="messageGenerate">Generate chat messages:</label><br>
             Generates dummy chat messages between users. Useful for testing message archiving.</td>
             <td><input type="checkbox" id="messageGenerate" name="messageGenerate" <%= "checked" %> /></td>
-        </tr>	
+        </tr>         
         <tr class="c1">
             <td width="1%" colspan="2" nowrap>
                 <input type="submit" name="Create"/>
