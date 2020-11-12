@@ -8,7 +8,7 @@
     </parent>
     <groupId>org.igniterealtime.openfire.plugins</groupId>
     <artifactId>userCreation</artifactId>
-    <version>1.4.0-SNAPSHOT</version>
+    <version>1.4.0</version>
     <name>UserCreation Plugin</name>
     <description>Creates users and populates rosters.</description>
 
